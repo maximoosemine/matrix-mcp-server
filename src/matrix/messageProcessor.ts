@@ -10,65 +10,64 @@ export type ProcessedMessage =
   | { type: "image"; data: string; mimeType: string };
 
 /**
- * Processes a Matrix event and extracts relevant content
- * 
- * @param event - Matrix event to process
- * @param matrixClient - Matrix client instance for fetching additional data
- * @returns Promise<ProcessedMessage | null> - Processed message or null if not processable
+ * Processes a Matrix event and extracts relevant content.
+ * Returns an array of content items (text messages return one item;
+ * image messages return a sender label followed by the image).
  */
 export async function processMessage(
   event: sdk.MatrixEvent,
   matrixClient: MatrixClient | null
-): Promise<ProcessedMessage | null> {
+): Promise<ProcessedMessage[] | null> {
   if (!matrixClient) {
     throw new Error("Matrix client is not initialized.");
   }
 
   const content = event.getContent();
-  
+
   if (event.getType() === EventType.RoomMessage && content) {
+    const sender = event.sender?.name || event.getSender() || "unknown";
     if (content.msgtype === "m.text") {
-      return {
-        type: "text",
-        text: String(content.body || ""),
-      };
+      return [
+        {
+          type: "text",
+          text: `[${sender}] ${String(content.body || "")}`,
+        },
+      ];
     } else if (content.msgtype === "m.image" && content.url) {
       try {
         const httpUrl = String(matrixClient.mxcUrlToHttp(content.url) || "");
         const response = await fetch(httpUrl);
-        
+
         if (!response.ok) {
           throw new Error(`Failed to fetch image: ${response.statusText}`);
         }
-        
+
         const buffer = await response.arrayBuffer();
         const base64Data = Buffer.from(buffer).toString("base64");
-        
-        return {
-          type: "image",
-          data: base64Data,
-          mimeType: String(
-            content.info?.mimetype || "application/octet-stream"
-          ),
-        };
+
+        return [
+          {
+            type: "text",
+            text: `[${sender}] shared an image:`,
+          },
+          {
+            type: "image",
+            data: base64Data,
+            mimeType: String(content.info?.mimetype || "application/octet-stream"),
+          },
+        ];
       } catch (error: any) {
         console.error(`Failed to fetch image content: ${error.message}`);
         return null;
       }
     }
   }
-  
+
   return null;
 }
 
 /**
  * Filters and processes messages within a date range
- * 
- * @param events - Array of Matrix events
- * @param startDate - Start date string
- * @param endDate - End date string
- * @param matrixClient - Matrix client instance
- * @returns Promise<ProcessedMessage[]> - Array of processed messages
  */
 export async function processMessagesByDate(
   events: sdk.MatrixEvent[],
@@ -84,26 +83,24 @@ export async function processMessagesByDate(
     return timestamp >= start && timestamp <= end;
   });
 
-  const messages = await Promise.all(
+  const messageArrays = await Promise.all(
     filteredEvents.map((event) => processMessage(event, matrixClient))
   );
 
-  return messages.filter((message) => message !== null) as ProcessedMessage[];
+  return messageArrays
+    .filter((items): items is ProcessedMessage[] => items !== null)
+    .flat();
 }
 
 /**
  * Counts messages by user in a room
- * 
- * @param events - Array of Matrix events
- * @param limit - Maximum number of users to return
- * @returns Array of user message counts
  */
 export function countMessagesByUser(
   events: sdk.MatrixEvent[],
   limit: number = 10
 ): Array<{ userId: string; count: number }> {
   const userMessageCounts: Record<string, number> = {};
-  
+
   events
     .filter((event) => event.getType() === EventType.RoomMessage)
     .forEach((event) => {

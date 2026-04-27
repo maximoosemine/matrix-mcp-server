@@ -29,7 +29,7 @@ export const getRoomMessagesHandler = async (
       };
     }
 
-    const messages = await Promise.all(
+    const messageArrays = await Promise.all(
       room
         .getLiveTimeline()
         .getEvents()
@@ -37,7 +37,9 @@ export const getRoomMessagesHandler = async (
         .map((event) => processMessage(event, client))
     );
 
-    const validMessages = messages.filter((message) => message !== null);
+    const validMessages = messageArrays
+      .filter((items): items is NonNullable<typeof items> => items !== null)
+      .flat();
 
     return {
       content:
