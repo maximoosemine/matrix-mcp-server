@@ -16,7 +16,12 @@ export const listJoinedRoomsHandler = async (_input: any, { requestInfo, authInf
     return {
       content: rooms.map((room) => ({
         type: "text",
-        text: `Room: ${room.name || "Unnamed Room"} (${room.roomId}) - ${room.getJoinedMemberCount()} members`,
+        text: (() => {
+          const events = room.getLiveTimeline().getEvents();
+          const lastTs = events.length > 0 ? events[events.length - 1].getTs() : null;
+          const lastActivity = lastTs ? new Date(lastTs).toISOString() : "unknown";
+          return `Room: ${room.name || "Unnamed Room"} (${room.roomId}) - ${room.getJoinedMemberCount()} members - last activity: ${lastActivity}`;
+        })(),
       })),
     };
   } catch (error: any) {
