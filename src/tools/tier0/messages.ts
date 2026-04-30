@@ -2,7 +2,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createConfiguredMatrixClient, getAccessToken, getMatrixContext } from "../../utils/server-helpers.js";
 import { removeClientFromCache } from "../../matrix/client.js";
-import { processMessage, processMessagesByDate, countMessagesByUser, buildReactionsMap } from "../../matrix/messageProcessor.js";
+import { processMessage, processMessagesByDate, countMessagesByUser, buildReactionsMap, buildMessagesMap } from "../../matrix/messageProcessor.js";
 import { ToolRegistrationFunction } from "../../types/tool-types.js";
 
 // Tool: Get room messages
@@ -31,11 +31,12 @@ export const getRoomMessagesHandler = async (
 
     const allEvents = room.getLiveTimeline().getEvents();
     const reactionsMap = buildReactionsMap(allEvents);
+    const messagesMap = buildMessagesMap(allEvents);
 
     const messageArrays = await Promise.all(
       allEvents
         .slice(-limit)
-        .map((event) => processMessage(event, client, reactionsMap))
+        .map((event) => processMessage(event, client, reactionsMap, messagesMap))
     );
 
     const validMessages = messageArrays

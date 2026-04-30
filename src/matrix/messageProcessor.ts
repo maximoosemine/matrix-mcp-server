@@ -34,6 +34,35 @@ export function buildReactionsMap(events: sdk.MatrixEvent[]): Map<string, Reacti
 }
 
 /**
+ * Builds a map of eventId -> MatrixEvent for all room message events.
+ * Used to resolve reply-to references.
+ */
+export function buildMessagesMap(events: sdk.MatrixEvent[]): Map<string, sdk.MatrixEvent> {
+  const map = new Map<string, sdk.MatrixEvent>();
+
+  for (const event of events) {
+    if (event.getType() === EventType.RoomMessage) {
+      const id = event.getId();
+      if (id) map.set(id, event);
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Strips the Matrix reply fallback quote from a message body.
+ * Reply bodies prepend "> <sender> original line\n> ...\n\nActual reply"
+ */
+function stripReplyFallback(body: string): string {
+  const parts = body.split("\n\n");
+  if (parts.length > 1 && parts[0].startsWith("> ")) {
+    return parts.slice(1).join("\n\n");
+  }
+  return body;
+}
+
+/**
  * Processes a Matrix event and extracts relevant content.
  * Returns an array of content items (text messages return one item;
  * image messages return a sender label followed by the image).
@@ -41,7 +70,8 @@ export function buildReactionsMap(events: sdk.MatrixEvent[]): Map<string, Reacti
 export async function processMessage(
   event: sdk.MatrixEvent,
   matrixClient: MatrixClient | null,
-  reactionsMap?: Map<string, Reaction[]>
+  reactionsMap?: Map<string, Reaction[]>,
+  messagesMap?: Map<string, sdk.MatrixEvent>
 ): Promise<ProcessedMessage[] | null> {
   if (!matrixClient) {
     throw new Error("Matrix client is not initialized.");
@@ -53,13 +83,30 @@ export async function processMessage(
     const sender = event.sender?.name || event.getSender() || "unknown";
     const reactions = reactionsMap?.get(event.getId() ?? "") ?? [];
 
+    // Resolve reply-to if present
+    const replyToEventId = content["m.relates_to"]?.["m.in_reply_to"]?.event_id;
+    let replyTo: { sender: string; message: string } | undefined;
+    if (replyToEventId && messagesMap) {
+      const replyToEvent = messagesMap.get(replyToEventId);
+      if (replyToEvent) {
+        const replyToContent = replyToEvent.getContent();
+        replyTo = {
+          sender: replyToEvent.sender?.name || replyToEvent.getSender() || "unknown",
+          message: String(replyToContent.body || ""),
+        };
+      }
+    }
+
     if (content.msgtype === "m.text") {
-      return [
-        {
-          type: "text",
-          text: JSON.stringify({ sender, message: String(content.body || ""), reactions }),
-        },
-      ];
+      // Strip the embedded fallback quote from reply bodies
+      const messageBody = replyToEventId
+        ? stripReplyFallback(String(content.body || ""))
+        : String(content.body || "");
+
+      const payload: Record<string, unknown> = { sender, message: messageBody, reactions };
+      if (replyTo) payload.replyTo = replyTo;
+
+      return [{ type: "text", text: JSON.stringify(payload) }];
     } else if (content.msgtype === "m.image" && content.url) {
       try {
         const httpUrl = String(matrixClient.mxcUrlToHttp(content.url) || "");
@@ -72,11 +119,11 @@ export async function processMessage(
         const buffer = await response.arrayBuffer();
         const base64Data = Buffer.from(buffer).toString("base64");
 
+        const payload: Record<string, unknown> = { sender, message: "[image]", reactions };
+        if (replyTo) payload.replyTo = replyTo;
+
         return [
-          {
-            type: "text",
-            text: JSON.stringify({ sender, message: "[image]", reactions }),
-          },
+          { type: "text", text: JSON.stringify(payload) },
           {
             type: "image",
             data: base64Data,
@@ -105,8 +152,9 @@ export async function processMessagesByDate(
   const start = new Date(startDate).getTime();
   const end = new Date(endDate).getTime();
 
-  // Build reactions map from all events before filtering so we capture every reaction
+  // Build lookup maps from all events before filtering
   const reactionsMap = buildReactionsMap(events);
+  const messagesMap = buildMessagesMap(events);
 
   const filteredEvents = events.filter((event) => {
     const timestamp = event.getTs();
@@ -114,7 +162,7 @@ export async function processMessagesByDate(
   });
 
   const messageArrays = await Promise.all(
-    filteredEvents.map((event) => processMessage(event, matrixClient, reactionsMap))
+    filteredEvents.map((event) => processMessage(event, matrixClient, reactionsMap, messagesMap))
   );
 
   return messageArrays
