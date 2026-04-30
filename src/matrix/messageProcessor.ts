@@ -83,9 +83,11 @@ export async function processMessage(
     const sender = event.sender?.name || event.getSender() || "unknown";
     const reactions = reactionsMap?.get(event.getId() ?? "") ?? [];
 
+    const date = new Date(event.getTs()).toISOString();
+
     // Resolve reply-to if present
     const replyToEventId = content["m.relates_to"]?.["m.in_reply_to"]?.event_id;
-    let replyTo: { sender: string; message: string } | undefined;
+    let replyTo: { sender: string; message: string; date: string } | undefined;
     if (replyToEventId && messagesMap) {
       const replyToEvent = messagesMap.get(replyToEventId);
       if (replyToEvent) {
@@ -93,6 +95,7 @@ export async function processMessage(
         replyTo = {
           sender: replyToEvent.sender?.name || replyToEvent.getSender() || "unknown",
           message: String(replyToContent.body || ""),
+          date: new Date(replyToEvent.getTs()).toISOString(),
         };
       }
     }
@@ -103,7 +106,7 @@ export async function processMessage(
         ? stripReplyFallback(String(content.body || ""))
         : String(content.body || "");
 
-      const payload: Record<string, unknown> = { sender, message: messageBody, reactions };
+      const payload: Record<string, unknown> = { sender, message: messageBody, date, reactions };
       if (replyTo) payload.replyTo = replyTo;
 
       return [{ type: "text", text: JSON.stringify(payload) }];
@@ -119,7 +122,7 @@ export async function processMessage(
         const buffer = await response.arrayBuffer();
         const base64Data = Buffer.from(buffer).toString("base64");
 
-        const payload: Record<string, unknown> = { sender, message: "[image]", reactions };
+        const payload: Record<string, unknown> = { sender, message: "[image]", date, reactions };
         if (replyTo) payload.replyTo = replyTo;
 
         return [
