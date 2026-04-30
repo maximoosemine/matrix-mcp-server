@@ -9,6 +9,30 @@ export type ProcessedMessage =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
 
+export type Reaction = { sender: string; reaction: string };
+
+/**
+ * Scans all timeline events and builds a map of eventId -> reactions.
+ * Must be called with the full event list before slicing for pagination.
+ */
+export function buildReactionsMap(events: sdk.MatrixEvent[]): Map<string, Reaction[]> {
+  const map = new Map<string, Reaction[]>();
+
+  for (const event of events) {
+    if (event.getType() === "m.reaction") {
+      const relatesTo = event.getContent()["m.relates_to"];
+      if (relatesTo?.rel_type === "m.annotation" && relatesTo.event_id) {
+        const list = map.get(relatesTo.event_id) ?? [];
+        const sender = event.sender?.name || event.getSender() || "unknown";
+        list.push({ sender, reaction: String(relatesTo.key || "") });
+        map.set(relatesTo.event_id, list);
+      }
+    }
+  }
+
+  return map;
+}
+
 /**
  * Processes a Matrix event and extracts relevant content.
  * Returns an array of content items (text messages return one item;
@@ -16,7 +40,8 @@ export type ProcessedMessage =
  */
 export async function processMessage(
   event: sdk.MatrixEvent,
-  matrixClient: MatrixClient | null
+  matrixClient: MatrixClient | null,
+  reactionsMap?: Map<string, Reaction[]>
 ): Promise<ProcessedMessage[] | null> {
   if (!matrixClient) {
     throw new Error("Matrix client is not initialized.");
@@ -26,11 +51,13 @@ export async function processMessage(
 
   if (event.getType() === EventType.RoomMessage && content) {
     const sender = event.sender?.name || event.getSender() || "unknown";
+    const reactions = reactionsMap?.get(event.getId() ?? "") ?? [];
+
     if (content.msgtype === "m.text") {
       return [
         {
           type: "text",
-          text: JSON.stringify({ sender, message: String(content.body || "") }),
+          text: JSON.stringify({ sender, message: String(content.body || ""), reactions }),
         },
       ];
     } else if (content.msgtype === "m.image" && content.url) {
@@ -48,7 +75,7 @@ export async function processMessage(
         return [
           {
             type: "text",
-            text: JSON.stringify({ sender, message: "[image]" }),
+            text: JSON.stringify({ sender, message: "[image]", reactions }),
           },
           {
             type: "image",
@@ -78,13 +105,16 @@ export async function processMessagesByDate(
   const start = new Date(startDate).getTime();
   const end = new Date(endDate).getTime();
 
+  // Build reactions map from all events before filtering so we capture every reaction
+  const reactionsMap = buildReactionsMap(events);
+
   const filteredEvents = events.filter((event) => {
     const timestamp = event.getTs();
     return timestamp >= start && timestamp <= end;
   });
 
   const messageArrays = await Promise.all(
-    filteredEvents.map((event) => processMessage(event, matrixClient))
+    filteredEvents.map((event) => processMessage(event, matrixClient, reactionsMap))
   );
 
   return messageArrays
