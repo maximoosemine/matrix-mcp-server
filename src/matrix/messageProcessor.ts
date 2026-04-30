@@ -30,7 +30,7 @@ export async function processMessage(
       return [
         {
           type: "text",
-          text: `[${sender}] ${String(content.body || "")}`,
+          text: JSON.stringify({ sender, message: String(content.body || "") }),
         },
       ];
     } else if (content.msgtype === "m.image" && content.url) {
@@ -48,7 +48,7 @@ export async function processMessage(
         return [
           {
             type: "text",
-            text: `[${sender}] shared an image:`,
+            text: JSON.stringify({ sender, message: "[image]" }),
           },
           {
             type: "image",
