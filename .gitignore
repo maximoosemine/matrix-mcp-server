@@ -31,3 +31,5 @@ dist/
 
 # MCP-specific
 .mcp_cache/
+
+start-matrix-mcp-server.sh 

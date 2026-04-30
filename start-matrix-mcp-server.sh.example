@@ -1,0 +1,4 @@
+#!/bin/sh
+export PATH="/usr/local/Cellar/node/25.9.0_2/bin:$PATH"
+cd <path to this repo on your local machine>
+exec npm start
