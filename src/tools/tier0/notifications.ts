@@ -112,12 +112,15 @@ Rooms with notifications: ${roomNotifications.length}`,
 
 // Tool: Get direct messages
 export const getDirectMessagesHandler = async (
-  { includeEmpty }: { includeEmpty: boolean },
+  { includeEmpty, afterDate, beforeDate }: { includeEmpty: boolean; afterDate?: string; beforeDate?: string },
   { requestInfo, authInfo }: any
 ) => {
   const { matrixUserId, homeserverUrl } = getMatrixContext(requestInfo?.headers);
   const accessToken = getAccessToken(requestInfo?.headers, authInfo?.token);
-  
+
+  const afterTs = afterDate ? new Date(afterDate).getTime() : null;
+  const beforeTs = beforeDate ? new Date(beforeDate).getTime() : null;
+
   try {
     const client = await createConfiguredMatrixClient(homeserverUrl, matrixUserId, accessToken);
     const rooms = client.getRooms();
@@ -163,6 +166,11 @@ export const getDirectMessagesHandler = async (
 
       // Skip empty DMs if not requested
       if (!includeEmpty && !lastEvent) continue;
+
+      // Filter by date range on last message timestamp
+      const lastTs = lastEvent?.getTs() ?? null;
+      if (afterTs !== null && (lastTs === null || lastTs < afterTs)) continue;
+      if (beforeTs !== null && (lastTs === null || lastTs > beforeTs)) continue;
 
       dmList.push({
         type: "text",
@@ -250,12 +258,20 @@ export const registerNotificationTools: ToolRegistrationFunction = (server) => {
     "get-direct-messages",
     {
       title: "Get Direct Message Conversations",
-      description: "List all direct message conversations with their recent activity and unread status",
+      description: "List all direct message conversations with their recent activity and unread status. Optionally filter by last message date range.",
       inputSchema: {
         includeEmpty: z
           .boolean()
           .default(false)
           .describe("Include DM rooms with no recent messages (default: false)"),
+        afterDate: z
+          .string()
+          .optional()
+          .describe("Only return DMs whose last message is after this ISO 8601 datetime (e.g., 2024-01-01T00:00:00Z)"),
+        beforeDate: z
+          .string()
+          .optional()
+          .describe("Only return DMs whose last message is before this ISO 8601 datetime (e.g., 2024-01-02T00:00:00Z)"),
       },
     },
     getDirectMessagesHandler

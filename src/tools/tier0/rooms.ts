@@ -5,16 +5,30 @@ import { removeClientFromCache } from "../../matrix/client.js";
 import { ToolRegistrationFunction } from "../../types/tool-types.js";
 
 // Tool: List joined rooms
-export const listJoinedRoomsHandler = async (_input: any, { requestInfo, authInfo }: any): Promise<CallToolResult> => {
+export const listJoinedRoomsHandler = async (
+  { afterDate, beforeDate }: { afterDate?: string; beforeDate?: string },
+  { requestInfo, authInfo }: any
+): Promise<CallToolResult> => {
   const { matrixUserId, homeserverUrl } = getMatrixContext(requestInfo?.headers);
   const accessToken = getAccessToken(requestInfo?.headers, authInfo?.token);
-  
+
+  const afterTs = afterDate ? new Date(afterDate).getTime() : null;
+  const beforeTs = beforeDate ? new Date(beforeDate).getTime() : null;
+
   try {
     const client = await createConfiguredMatrixClient(homeserverUrl, matrixUserId, accessToken);
 
     const rooms = client.getRooms();
+    const filtered = rooms.filter((room) => {
+      const events = room.getLiveTimeline().getEvents();
+      const lastTs = events.length > 0 ? events[events.length - 1].getTs() : null;
+      if (afterTs !== null && (lastTs === null || lastTs < afterTs)) return false;
+      if (beforeTs !== null && (lastTs === null || lastTs > beforeTs)) return false;
+      return true;
+    });
+
     return {
-      content: rooms.map((room) => ({
+      content: filtered.map((room) => ({
         type: "text",
         text: (() => {
           const events = room.getLiveTimeline().getEvents();
@@ -164,8 +178,17 @@ export const registerRoomTools: ToolRegistrationFunction = (server) => {
     "list-joined-rooms",
     {
       title: "List Joined Matrix Rooms",
-      description: "Get a list of all Matrix rooms the user has joined, including room names, IDs, and basic information",
-      inputSchema: {},
+      description: "Get a list of all Matrix rooms the user has joined, including room names, IDs, and basic information. Optionally filter by last activity date range.",
+      inputSchema: {
+        afterDate: z
+          .string()
+          .optional()
+          .describe("Only return rooms whose last activity is after this ISO 8601 datetime (e.g., 2024-01-01T00:00:00Z)"),
+        beforeDate: z
+          .string()
+          .optional()
+          .describe("Only return rooms whose last activity is before this ISO 8601 datetime (e.g., 2024-01-02T00:00:00Z)"),
+      },
     },
     listJoinedRoomsHandler
   );
